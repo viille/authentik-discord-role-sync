@@ -13,6 +13,10 @@ export function configurationKey(config) {
     authentikUrl: config.authentikUrl,
     sourceSlug: config.sourceSlug,
     removeUnlinked: config.removeUnlinked,
+    maxMutations: config.maxMutations,
+    maxRemovals: config.maxRemovals,
+    maxLinkDropPercent: config.maxLinkDropPercent,
+    minLinkedUsers: config.minLinkedUsers,
     mappings: [...config.mappings].map((m) => ({ ...m })).sort((a, b) =>
       JSON.stringify(a).localeCompare(JSON.stringify(b))),
   };
