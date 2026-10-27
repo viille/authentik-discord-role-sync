@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 const discordId = /^\d{16,22}$/;
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function parseMappings(json) {
   if (!Array.isArray(json) || json.length === 0) {
