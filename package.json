@@ -1,12 +1,12 @@
 {
   "name": "authentik-discord-role-sync",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "One-way authentik group/RBAC role -> Discord role synchronization",
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/sync.js && node --check src/authentik.js && node --check src/config.js && node --check src/logic.js && node --check src/account.js",
+    "check": "node --check src/index.js && node --check src/sync.js && node --check src/authentik.js && node --check src/config.js && node --check src/logic.js && node --check src/account.js && node --check src/state.js",
     "test": "node --test"
   },
   "engines": { "node": ">=22" },

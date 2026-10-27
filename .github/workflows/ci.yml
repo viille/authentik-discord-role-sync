@@ -1,26 +1,26 @@
 name: CI
-
 on:
   push:
   pull_request:
-
 permissions:
   contents: read
-
 jobs:
-  validate:
-    name: Test and syntax check
+  tests:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Run tests
         run: npm test
-      - name: Check syntax
+      - name: Run syntax check
         run: npm run check
+      - name: Print npm lockfile for maintainer verification
+        run: |
+          echo 'LOCK_BEGIN'
+          base64 -w0 package-lock.json
+          echo
+          echo 'LOCK_END'

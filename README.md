@@ -1,45 +1,38 @@
-# Authentik → Discord Role Sync
+# Authentik Discord Role Sync
 
-Authentik-ryhmien ja suoraan liitettyjen RBAC-roolien yksisuuntainen synkronointi valittuihin Discord-rooleihin. Node.js 22+ ja Docker Compose.
+Node.js Discord-botti synkronoi määritetyt Authentik-ryhmät, suorat RBAC-roolit ja perityt RBAC-roolit Discordiin. Authentik on käyttöoikeuksien lähde. Version 1.2.0 tietoturvakovennukset estävät tahattoman massapoiston.
 
-## Toiminta
+## Toiminnot
 
-- Authentik on roolitietojen lähde. Discord-tunniste tunnistetaan Authentikin Discord OAuth Source -yhteyden `identifier`-kentästä, ei käyttäjänimestä.
-- Synkronoi vain `config/roles.json`-tiedostoon määritetyt Discord-roolit. Kaikki muut roolit säilyvät.
-- Tukee yhtä Authentik-ryhmää tai suoraa RBAC-roolia sekä useita vastaavuuksia samaan Discord-rooliin (OR).
-- Synkronointi ajastetusti (oletus 300 s), ylläpitäjän pyynnöstä komennolla `/rolesync now` sekä muutoksia tekemätön esikatselu komennolla `/rolesync dryrun`.
-- `/link` ja `/unlink` näyttävät yksityisen viestin ja painikkeen Authentikin käyttäjäasetuksiin. **Komennot eivät itse yhdistä tai irrota OAuth-yhteyttä.**
-- Oletuksena roolimuutokset tehdään heti: `DRY_RUN=false`. Roolimuutosten enimmäismäärä per ajo on `MAX_MUTATIONS_PER_RUN=50`; `/rolesync dryrun` toimii aina vain esikatseluna.
+- Authentik OAuth Source -yhteyden `identifier`-kenttä tunnistaa Discord-käyttäjän ID:n.
+- `config/roles.json` määrää botin hallinnoimat roolit. Muut Discord-roolit säilyvät.
+- `group` kohdistaa käyttäjän suoraan Authentik-ryhmään. `role` kohdistaa käyttäjälle suoraan annettuun RBAC-rooliin. `effective_role` sisältää myös ryhmältä ja sen vanhemmilta perityt RBAC-roolit.
+- `/link` antaa Authentikin Connected services -linkin.
+- `/unlink` antaa Authentik-asetukset ja **valinnaisesti** käyttäjän vahvistaman suoran OAuth-yhteyden katkaisun.
+- `/rolesync dryrun` esikatselee roolimuutokset. `/rolesync activate` aktivoi LIVE-ajot käyttöönotossa ja roolikonfiguraation muuttuessa.
+- `/rolesync now` suorittaa synkronoinnin heti; `/rolesync status` näyttää tilanteen; `/rolesync history` näyttää pysyvän auditointilokin viimeisimmät tapahtumat.
 
-## Asennus
+## Turvallinen käyttöönotto
 
-### 1. Discord
+**`DRY_RUN=false` on oletus**, mutta uusi asennus aloittaa lukitussa tilassa. Aja Discordissa ylläpitäjänä:
 
-1. Luo Discord-sovellus osoitteessa https://discord.com/developers/applications ja ota talteen Bot Token.
-2. Ota botille käyttöön **Server Members Intent** ja kutsu se halutulle palvelimelle scopeilla `bot` ja `applications.commands`.
-3. Anna oikeus **Manage Roles**, ei Administrator-oikeuksia.
-4. Sijoita botin rooli Discordin roolihierarkiassa kaikkien synkronoitavien roolien yläpuolelle.
-5. Kopioi Discord-palvelimen ID ja hallinnoitavien roolien ID:t (Developer Mode).
+1. `/rolesync dryrun` (tarkista esikatselu).
+2. `/rolesync activate` **30 minuutin kuluessa** onnistuneesta esikatselusta.
+3. `/rolesync now` (ensimmäinen varsinainen LIVE-ajo).
 
-### 2. Authentik
+Aktivointi tallentuu tiedostoon `/data/state.json` Docker-nimetyssä taltiolla ja säilyy uudelleenkäynnistyksen yli. **Jos synkronoitavat roolit, palvelin, Authentik-palvelin, source tai REMOVE_UNLINKED muuttuvat, aktivointi raukeaa**, ja ylläpitäjän on katselmoitava muutokset uudelleen.
 
-1. Luo Authentikiin **Discord OAuth Source**: https://docs.goauthentik.io/users-sources/sources/social-logins/discord/
-2. Määritä Discord Developer Portalissa OAuth2 Redirect URI `https://AUTHENTIK-DOMAIN/source/oauth/callback/discord/`, kun Authentik-source slug on `discord`. Lisää Discord OAuth client ID ja secret Authentikiin.
-3. Käyttäjät yhdistävät Discordin olemassa olevaan Authentik-tiliinsä valitsemalla **Connected services / Yhdistetyt palvelut**. Jos Discord on kirjautumistapa, varmista ettei käyttäjä luo vahingossa toista Authentik-tiliä.
-4. Luo Authentik-palvelutili ja sille **vain lukuoikeudet** `/api/v3/core/users/`- ja `/api/v3/sources/user_connections/oauth/`-rajapintoihin. Botti ei tarvitse kirjoitusoikeuksia Authentikiin.
-5. Kopioi Authentik-ryhmien ja/tai suoraan annettujen RBAC-roolien UUID-tunnisteet.
+Vain `Manage Server` -oikeudella voi käyttää hallintakomentoja. Botille riittää `Manage Roles`, ja sen rooli tulee sijoittaa synkronoitavien roolien yläpuolelle. Ota käyttöön myös **Server Members Intent** ja kutsu botti scopeilla `bot`, `applications.commands`.
 
-> `authentik_type: "role"` vastaa käyttäjän suoraan liitettyjä `roles`-arvoja. Se ei automaattisesti tarkoita ryhmältä perittyjä RBAC-oikeuksia. Käytä `group`-määritystä, jos käyttöoikeudet määräytyvät ryhmistä.
+## Konfigurointi
 
-### 3. Asetukset
+1. Luo Authentikiin Discord OAuth Source. Lisää Discord Developer Portalin Client ID, secret ja callback `https://AUTHENTIK-DOMAIN/source/oauth/callback/discord/` (kun source slug on `discord`).
+2. Käyttäjät yhdistävät omat Authentik- ja Discord-tilinsä Authentikin **Connected services** -asetuksissa. Älä luo uusia Authentik-tilejä tämän linkityksen yhteydessä.
+3. Luo Authentik-palvelutili, jolla on lukuoikeus `core/users/`- ja `sources/user_connections/oauth/` -rajapintoihin. Jos käytössä on `effective_role`, tarvitaan lisäksi `core/groups/{uuid}/` -lukuoikeus.
+4. Kopioi `.env.example` tiedostoksi `.env` ja täytä Discord- sekä Authentik-arvot. Älä tallenna tokeneita versionhallintaan.
+5. Muokkaa `config/roles.json` sisältämään omat Authentik-UUID:t ja Discord-roolien ID:t.
 
-```bash
-cp .env.example .env
-```
-
-Täytä `.env`-tiedostossa `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `AUTHENTIK_BASE_URL`, `AUTHENTIK_API_TOKEN` ja `AUTHENTIK_DISCORD_SOURCE_SLUG`.
-
-Muokkaa `config/roles.json`-tiedostoon oikeat Authentik UUID:t ja Discord-role ID:t. Esimerkki:
+Roolimääritys:
 
 ```json
 [
@@ -49,72 +42,67 @@ Muokkaa `config/roles.json`-tiedostoon oikeat Authentik UUID:t ja Discord-role I
     "discord_role_id": "111111111111111111"
   },
   {
-    "authentik_type": "role",
+    "authentik_type": "effective_role",
     "authentik_id": "33333333-3333-4333-8333-333333333333",
     "discord_role_id": "333333333333333333"
   }
 ]
 ```
 
-Sallitut asetukset:
+Roolien periytymisessä käytetään Authentikin `include_inherited_roles=true` -rajapintaa. RBAC:n `role`- ja `effective_role`-kartoitukset edellyttävät Authentik 2025.12 -versiota tai uudempaa.
 
-| Muuttuja | Oletus | Tarkoitus |
+| Asetus | Oletus | Kuvaus |
 | --- | --- | --- |
-| `DRY_RUN` | `false` | Ajastetut ajot ja `/rolesync now` muuttavat rooleja. Arvo `true` estää ne kaikki; `/rolesync dryrun` on aina vain esikatselu. |
-| `REMOVE_UNLINKED` | `true` | Poistaa botin hallinnoimat roolit jäseniltä, joilla ei ole Authentik-Discord-liitosta |
-| `MIN_LINKED_USERS` | `1` | Estää muutokset, jos lähdetilejä löytyy liian vähän |
-| `MAX_MUTATIONS_PER_RUN` | `50` | Estää ajon, jos muutoksia olisi yli rajan |
-| `SYNC_INTERVAL_SECONDS` | `300` | Synkronointien väli sekunteina (vähintään 60) |
+| `DRY_RUN` | `false` | `true` pakottaa kaikki roolisynkronoinnit read-only-tilaan |
+| `REMOVE_UNLINKED` | `true` | Poista botin hallinnoimat roolit, jos Discord-käyttäjällä ei ole OAuth-yhteyttä |
+| `SYNC_INTERVAL_SECONDS` | `300` | Automaattisen synkronoinnin väli |
+| `MAX_MUTATIONS_PER_RUN` | `50` | LIVE-ajon korkeintaan sallittu muutosmäärä |
+| `MAX_REMOVALS_PER_RUN` | `10` | LIVE-ajon korkeintaan sallittu roolien poistomäärä |
+| `MAX_LINK_DROP_PERCENT` | `25` | Ajo keskeytyy, jos aiempaan onnistuneeseen ajoon verrattuna linkitysten pudotus ylittää rajan (lähtötaso vähintään 5) |
+| `MIN_LINKED_USERS` | `1` | Vähimmäismäärä Authentik–Discord-yhteyksiä |
+| `STATE_FILE` | `./data/state.json` | Pysyvän tilan ja auditointihistorian tiedosto (Docker: `/data/state.json`) |
+| `AUTHENTIK_UNLINK_API_TOKEN` | Ei asetettu | Erillinen **vain OAuth source connection -poiston salliva** token suoraan `/unlink`-toimintoon |
 
-**Huomio:** `REMOVE_UNLINKED=true` käsittelee kaikki konfiguroidut Discord-roolit täysin botin hallinnoimina. Jos niitä on aiemmin jaettu käsin, ne voidaan poistaa yhdistämättömiltä jäseniltä. **Oletusasetus `DRY_RUN=false` muuttaa roolit jo ensimmäisellä käynnistyskerralla.** Jos et halua tätä, aseta tilapäisesti `DRY_RUN=true` ennen ensimmäistä käynnistystä; vaihtoehtoisesti voit käyttää `/rolesync dryrun` -komentoa käynnissä olevassa botissa. Jos `REMOVE_UNLINKED=false`, `/unlink` ei johda automaattiseen Discord-roolien poistoon.
+`MAX_REMOVALS_PER_RUN` ja `MAX_MUTATIONS_PER_RUN` estävät aidot muutokset myös aktivoinnin jälkeen. Esikatselu kertoo eston syyn ilman muutoksia. Odottamattoman poistopiikin tapauksessa selvitä aiheuttaja ensin ja korota rajaa vain tietoisesti.
 
-### 4. Käynnistys
+### /unlink: valinnainen suora katkaisu
+
+Jos `AUTHENTIK_UNLINK_API_TOKEN` on asetettu, komento näyttää käyttäjälle vahvistuspainikkeen. Botti poistaa **ainoastaan kyseisen Discord-käyttäjä-ID:n** Authentik OAuth Source -yhteyden erillistä poistotokenia käyttäen. Käyttäjä ei voi katkaista muiden yhteyksiä komennolla.
+
+Jos tokenia ei ole, `/unlink` ohjaa Authentikin Connected services -asetuksiin. Näin botti voidaan ajaa kokonaan vain lukuoikeuksilla Authentikiin.
+
+**Ennen katkaisua on varmistettava toinen kirjautumistapa Authentikiin.** Discord-roolit päivittyvät seuraavalla onnistuneella LIVE-ajolla, kun `REMOVE_UNLINKED=true`.
+
+## Käynnistys ja päivitys
 
 ```bash
+cp .env.example .env
+# Täytä .env ja config/roles.json
 docker compose up -d --build
 docker compose logs -f role-sync
 ```
 
-Paikallisesti:
+Päivitä tuotanto:
 
 ```bash
-npm install
+git pull
+docker compose up -d --build
+```
+
+Docker Compose sisältää nimetyn taltion `role_sync_state`. **Älä poista taltiota `docker compose down -v` -komennolla**, tai aktivointi ja auditointihistoria katoavat. Uudelleenkäynnistyksen jälkeen botin tila säilyy, ellei konfiguraatio muutu.
+
+## Testit ja turvallisuus
+
+```bash
+npm ci
 npm test
 npm run check
-npm start
 ```
 
-`/rolesync dryrun` näyttää suunnitellut lisäykset ja poistot vain komennon käyttäjälle, mutta **ei muuta rooleja eikä pysäytä ajastettua synkronointia**. `/rolesync now` tekee roolimuutokset heti, ellei `.env`-tiedostossa ole erikseen `DRY_RUN=true`.
+- Tuntemattomaan Authentik-käyttäjään viittaava source connection pysäyttää koko synkronoinnin. Myös Authentik-API-virheet, virheelliset yhteydet ja puutteellinen Discord-jäsenluettelo pysäyttävät ajon.
+- Ryhmistä perittyjen roolien tiedon puuttuminen pysäyttää niiden synkronoinnin.
+- Pysyvä auditointihistoria (viimeiset 1500 tapahtumaa), viimeiset 100 ajoa ja viimeisin onnistunut LIVE-käyttäjämäärä säilytetään paikallisessa tilatiedostossa.
+- Poistot eivät ole atomisia Discordin API:n kanssa. Jos palvelin kaatuu kesken roolimuutosten, seuraava onnistunut ajo täsmäyttää tilanteen. Virheellisiä tai keskeytyneitä ajoja ei kirjata onnistuneiksi.
+- Yksi Discord-palvelin ja yksi aktiivinen synkronointiprosessi kerrallaan. Täysi todentaminen edellyttää integraatiotestiä oikeaa Authentikia ja Discordia vasten.
 
-Jos muutat `.env`-tiedostoa, päivitä käynnissä oleva kontti:
-
-```bash
-docker compose up -d --force-recreate
-```
-
-## Discord-komennot
-
-| Komento | Oikeus | Toiminto |
-| --- | --- | --- |
-| `/link` | Kaikki jäsenet | Yksityinen linkki Authentikin **Connected services** -näkymään Discordin yhdistämiseksi |
-| `/unlink` | Kaikki jäsenet | Yksityinen linkki Authentikin **Connected services** -näkymään Discordin irrottamiseksi |
-| `/rolesync status` | Manage Server | Viimeinen synkronointitulos |
-| `/rolesync now` | Manage Server | Käynnistää synkronoinnin heti (oletusarvoisesti LIVE) |
-| `/rolesync dryrun` | Manage Server | Esikatselee muutokset yksityisessä vastauksessa, ei koskaan muuta rooleja |
-
-Authentikin käyttäjäasetusten osoite on `/if/user/#/settings`. Kun käyttäjä irrottaa Discordin siellä, synkronoijan hallitsemat roolit poistuvat seuraavalla onnistuneella ajolla, **jos** `REMOVE_UNLINKED=true` ja `DRY_RUN=false`. Varmista vaihtoehtoinen kirjautumistapa ennen yhteyden poistamista, jos Discord on ainoa Authentik-kirjautumismenetelmä.
-
-## Turvallisuus ja rajoitukset
-
-- Authentik-API:n virhe tai epäselvä Discord-tunniste keskeyttää synkronoinnin sen sijaan, että kyseinen tilanne tulkittaisiin massairrottamiseksi.
-- Botti tarkistaa oikeudet, roolihierarkian, jäsenluettelon ja muutoskaton ennen LIVE-muutoksia. `/rolesync dryrun` näyttää myös muutoskaton ylittävät muutokset, mutta ei tee niitä.
-- Yksittäiset Discord-API-virheet kirjataan lokiin ja yritetään myöhemmällä ajolla uudelleen.
-- Synkronointi on polling-pohjainen, ei reaaliaikainen webhook. Tuettu on yksi Discord-palvelin.
-- Botti ei muuta nimimerkkejä, kanavia, käyttäjätietoja eikä synkronoi Discord-rooleja takaisin Authentikiin.
-- **Älä koskaan commitoi `.env`-tiedostoa tai API-tokenia.** Esimerkkitiedosto on `.env.example`.
-
-### Kehitys
-
-GitHub Actions suorittaa `npm test` ja `npm run check` aina pushin ja pull requestin yhteydessä. Testit eivät korvaa oikeaan Authentik- ja Discord-ympäristöön tehtävää integraatiotestausta.
-
-Authentik API: https://api.goauthentik.io/reference/core-users-list/ ja https://api.goauthentik.io/reference/sources-user-connections-oauth-list/
+Authendik API: https://api.goauthentik.io/reference/sources-user-connections-oauth-list/ ja https://api.goauthentik.io/reference/core-groups-retrieve/

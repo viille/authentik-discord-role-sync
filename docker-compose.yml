@@ -4,6 +4,10 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    volumes:
+      - role_sync_state:/data
+    environment:
+      STATE_FILE: /data/state.json
     read_only: true
     tmpfs:
       - /tmp
@@ -11,3 +15,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  role_sync_state:

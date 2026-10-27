@@ -10,7 +10,7 @@ export function parseMappings(json) {
   const seen = new Set();
   return json.map((item, index) => {
     if (!item || typeof item !== 'object' ||
-        !['group', 'role'].includes(item.authentik_type) ||
+        !['group', 'role', 'effective_role'].includes(item.authentik_type) ||
         !uuid.test(item.authentik_id ?? '') ||
         !discordId.test(item.discord_role_id ?? '')) {
       throw new Error(`Invalid role mapping at index ${index}`);
@@ -67,6 +67,10 @@ export function loadConfig(env = process.env, mappingFile = './config/roles.json
     sourceSlug: env.AUTHENTIK_DISCORD_SOURCE_SLUG,
     syncIntervalSeconds: intEnv(env.SYNC_INTERVAL_SECONDS, 'SYNC_INTERVAL_SECONDS', 300, 60, 86400),
     dryRun: boolEnv(env.DRY_RUN, 'DRY_RUN', false),
+    stateFile: env.STATE_FILE || './data/state.json',
+    unlinkApiToken: env.AUTHENTIK_UNLINK_API_TOKEN || null,
+    maxRemovals: intEnv(env.MAX_REMOVALS_PER_RUN, 'MAX_REMOVALS_PER_RUN', 10, 1, 100000),
+    maxLinkDropPercent: intEnv(env.MAX_LINK_DROP_PERCENT, 'MAX_LINK_DROP_PERCENT', 25, 0, 100),
     removeUnlinked: boolEnv(env.REMOVE_UNLINKED, 'REMOVE_UNLINKED', true),
     maxMutations: intEnv(env.MAX_MUTATIONS_PER_RUN, 'MAX_MUTATIONS_PER_RUN', 50, 1, 100000),
     minLinkedUsers: intEnv(env.MIN_LINKED_USERS, 'MIN_LINKED_USERS', 1, 0, 100000),

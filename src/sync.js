@@ -1,10 +1,12 @@
 import { PermissionFlagsBits } from 'discord.js';
-
 import { calculateChanges } from './logic.js';
 
-export async function synchronize({ guild, authentik, config, log, dryRun = config.dryRun }) {
-  // All authentik API requests complete BEFORE any Discord change.
-  const snapshot = await authentik.snapshot();
+export async function synchronize({
+  guild, authentik, config, log, dryRun = config.dryRun, baseline = null,
+  onChange = () => {},
+}) {
+  // Fetch and validate the complete source snapshot before making Discord changes.
+  const snapshot = await authentik.snapshot({ mappings: config.mappings });
   if (snapshot.linkedCount < config.minLinkedUsers) {
     throw new Error(`Only ${snapshot.linkedCount} linked users (minimum ${config.minLinkedUsers}); no changes`);
   }
@@ -21,32 +23,38 @@ export async function synchronize({ guild, authentik, config, log, dryRun = conf
       throw new Error(`Bot role must be above target role ${role.name} (${roleId})`);
     }
   }
-  // Intent GuildMembers is required for a complete guild-wide role reconciliation.
   const members = await guild.members.fetch();
-  if (members.size === 0 || members.size < guild.memberCount) {
+  if (!members.size || members.size < guild.memberCount) {
     throw new Error(`Incomplete Discord member list: fetched ${members.size}/${guild.memberCount}`);
   }
-  const { checked, changes } = calculateChanges(members, snapshot, config.mappings, config.removeUnlinked);
-  if (!dryRun && changes.length > config.maxMutations) {
-    throw new Error(`Safety limit: ${changes.length} changes > MAX_MUTATIONS_PER_RUN=${config.maxMutations}`);
-  }
+  const { checked, changes, currentlyManaged } = calculateChanges(
+    members, snapshot, config.mappings, config.removeUnlinked,
+  );
   const plannedAdds = changes.filter((change) => change.action === 'add').length;
   const plannedRemoves = changes.length - plannedAdds;
+  const maxRemovals = config.maxRemovals ?? 10;
+  const maxDrop = config.maxLinkDropPercent ?? 25;
+  const overMutationLimit = changes.length > config.maxMutations;
+  const overRemovalLimit = plannedRemoves > maxRemovals;
+  const linkedDropPercent = baseline?.linked >= 5 && snapshot.linkedCount < baseline.linked
+    ? Math.round((1 - snapshot.linkedCount / baseline.linked) * 100)
+    : 0;
+  const overLinkDropLimit = linkedDropPercent > maxDrop;
+
   const result = {
-    dryRun,
-    plannedAdds,
-    plannedRemoves,
-    overMutationLimit: changes.length > config.maxMutations,
-    // Preview at most 15 operations so slash responses stay within Discord's 2000-character limit.
+    dryRun, linked: snapshot.linkedCount, members: members.size, checked,
+    planned: changes.length, plannedAdds, plannedRemoves, currentlyManaged,
+    linkedDropPercent, overMutationLimit, overRemovalLimit, overLinkDropLimit,
+    // Preview a bounded set of changes in Discord's ephemeral response.
     preview: dryRun ? changes.slice(0, 15).map((c) => `${c.action} ${c.roleId} ${c.member.id}`) : [],
-    linked: snapshot.linkedCount,
-    members: members.size,
-    checked,
-    planned: changes.length,
-    added: 0,
-    removed: 0,
-    errors: 0,
+    added: 0, removed: 0, errors: 0,
   };
+  if (!dryRun) {
+    if (overMutationLimit) throw new Error(`Safety limit: ${changes.length} changes > MAX_MUTATIONS_PER_RUN=${config.maxMutations}`);
+    if (overRemovalLimit) throw new Error(`Safety limit: ${plannedRemoves} removals > MAX_REMOVALS_PER_RUN=${maxRemovals}`);
+    if (overLinkDropLimit) throw new Error(`Suspicious decrease in linked users: ${linkedDropPercent}% > MAX_LINK_DROP_PERCENT=${maxDrop}%`);
+  }
+
   for (const change of changes) {
     const description = `${change.action} ${change.roleId} ${change.member.id}`;
     if (dryRun) {
@@ -65,24 +73,26 @@ export async function synchronize({ guild, authentik, config, log, dryRun = conf
     } catch (error) {
       result.errors++;
       log('error', `Failed ${description}: ${error.message}`);
+      continue;
     }
+    // If persistent audit recording fails, stop before touching any further roles.
+    await onChange({ action: change.action, discordId: change.member.id, roleId: change.roleId });
   }
-  return result;
+  return { ...result, snapshot };
 }
 
-/**
- * Short, administrator-only status/preview for ephemeral slash-command replies.
- */
 export function formatSyncResult(result, includePreview = false) {
   const mode = result.dryRun ? 'DRY RUN: rooleja ei muutettu.' : 'LIVE: synkronointi suoritettu.';
   const counts = `Suunniteltu: ${result.planned} (lisäyksiä ${result.plannedAdds}, poistoja ${result.plannedRemoves}).`;
-  const processed = `Käyttäjiä: ${result.checked}; yhdistettyjä tilejä: ${result.linked}.`;
+  const processed = `Tarkistettuja: ${result.checked}; yhdistettyjä tilejä: ${result.linked}.`;
   const actual = result.dryRun ? '' :
     `Tehty: lisäyksiä ${result.added}, poistoja ${result.removed}, virheitä ${result.errors}.`;
-  const safety = result.overMutationLimit
-    ? `Huomio: ${result.planned} muutosta ylittää MAX_MUTATIONS_PER_RUN-rajan; LIVE-ajo estettäisiin.`
-    : '';
-  const lines = [mode, counts, processed, actual, safety].filter(Boolean);
+  const warnings = [
+    result.overMutationLimit ? 'LIVE-ajo estettäisiin: liian monta muutosta.' : null,
+    result.overRemovalLimit ? 'LIVE-ajo estettäisiin: liian monta poistoa.' : null,
+    result.overLinkDropLimit ? `LIVE-ajo estettäisiin: linkitettyjen tilien määrä laski ${result.linkedDropPercent}%.` : null,
+  ].filter(Boolean);
+  const lines = [mode, counts, processed, actual, ...warnings].filter(Boolean);
   if (result.dryRun && includePreview && result.preview?.length) {
     lines.push('Ensimmäiset suunnitellut muutokset:');
     lines.push(...result.preview.map((line) => '`' + line + '`'));
@@ -90,5 +100,6 @@ export function formatSyncResult(result, includePreview = false) {
       lines.push(`Lisäksi ${result.planned - result.preview.length} muutosta. Tarkempi erittely lokissa.`);
     }
   }
-  return lines.join('\n');
+  // Prevent hitting the Discord message size limit.
+  return lines.join('\n').slice(0, 1900);
 }
