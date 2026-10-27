@@ -2,7 +2,7 @@ import { PermissionFlagsBits } from 'discord.js';
 
 import { calculateChanges } from './logic.js';
 
-export async function synchronize({ guild, authentik, config, log }) {
+export async function synchronize({ guild, authentik, config, log, dryRun = config.dryRun }) {
   // All authentik API requests complete BEFORE any Discord change.
   const snapshot = await authentik.snapshot();
   if (snapshot.linkedCount < config.minLinkedUsers) {
@@ -27,11 +27,18 @@ export async function synchronize({ guild, authentik, config, log }) {
     throw new Error(`Incomplete Discord member list: fetched ${members.size}/${guild.memberCount}`);
   }
   const { checked, changes } = calculateChanges(members, snapshot, config.mappings, config.removeUnlinked);
-  if (changes.length > config.maxMutations) {
+  if (!dryRun && changes.length > config.maxMutations) {
     throw new Error(`Safety limit: ${changes.length} changes > MAX_MUTATIONS_PER_RUN=${config.maxMutations}`);
   }
+  const plannedAdds = changes.filter((change) => change.action === 'add').length;
+  const plannedRemoves = changes.length - plannedAdds;
   const result = {
-    dryRun: config.dryRun,
+    dryRun,
+    plannedAdds,
+    plannedRemoves,
+    overMutationLimit: changes.length > config.maxMutations,
+    // Preview at most 15 operations so slash responses stay within Discord's 2000-character limit.
+    preview: dryRun ? changes.slice(0, 15).map((c) => `${c.action} ${c.roleId} ${c.member.id}`) : [],
     linked: snapshot.linkedCount,
     members: members.size,
     checked,
@@ -42,7 +49,7 @@ export async function synchronize({ guild, authentik, config, log }) {
   };
   for (const change of changes) {
     const description = `${change.action} ${change.roleId} ${change.member.id}`;
-    if (config.dryRun) {
+    if (dryRun) {
       log('info', `DRY RUN ${description}`);
       continue;
     }
@@ -61,4 +68,27 @@ export async function synchronize({ guild, authentik, config, log }) {
     }
   }
   return result;
+}
+
+/**
+ * Short, administrator-only status/preview for ephemeral slash-command replies.
+ */
+export function formatSyncResult(result, includePreview = false) {
+  const mode = result.dryRun ? 'DRY RUN: rooleja ei muutettu.' : 'LIVE: synkronointi suoritettu.';
+  const counts = `Suunniteltu: ${result.planned} (lisäyksiä ${result.plannedAdds}, poistoja ${result.plannedRemoves}).`;
+  const processed = `Käyttäjiä: ${result.checked}; yhdistettyjä tilejä: ${result.linked}.`;
+  const actual = result.dryRun ? '' :
+    `Tehty: lisäyksiä ${result.added}, poistoja ${result.removed}, virheitä ${result.errors}.`;
+  const safety = result.overMutationLimit
+    ? `Huomio: ${result.planned} muutosta ylittää MAX_MUTATIONS_PER_RUN-rajan; LIVE-ajo estettäisiin.`
+    : '';
+  const lines = [mode, counts, processed, actual, safety].filter(Boolean);
+  if (result.dryRun && includePreview && result.preview?.length) {
+    lines.push('Ensimmäiset suunnitellut muutokset:');
+    lines.push(...result.preview.map((line) => '`' + line + '`'));
+    if (result.planned > result.preview.length) {
+      lines.push(`Lisäksi ${result.planned - result.preview.length} muutosta. Tarkempi erittely lokissa.`);
+    }
+  }
+  return lines.join('\n');
 }

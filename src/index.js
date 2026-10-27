@@ -5,7 +5,7 @@ import {
 } from 'discord.js';
 import { loadConfig } from './config.js';
 import { AuthentikClient } from './authentik.js';
-import { synchronize } from './sync.js';
+import { synchronize, formatSyncResult } from './sync.js';
 import { accountReply } from './account.js';
 
 const config = loadConfig();
@@ -28,7 +28,8 @@ const commands = [
     .setDescription('Authentik–Discord-roolisynkronoinnin hallinta')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addSubcommand((s) => s.setName('status').setDescription('Näytä viimeisin synkronointitulos'))
-    .addSubcommand((s) => s.setName('now').setDescription('Suorita synkronointi heti')),
+    .addSubcommand((s) => s.setName('now').setDescription('Suorita synkronointi heti'))
+    .addSubcommand((s) => s.setName('dryrun').setDescription('Näytä roolimuutokset muuttamatta rooleja')),
 ];
 
 let running = false;
@@ -37,11 +38,11 @@ let lastTime = null;
 let lastError = null;
 let guild;
 
-async function runSync() {
+async function runSync({ dryRun = config.dryRun } = {}) {
   if (running) return { busy: true };
   running = true;
   try {
-    const result = await synchronize({ guild, authentik, config, log });
+    const result = await synchronize({ guild, authentik, config, log, dryRun });
     lastResult = result;
     lastError = null;
     lastTime = new Date().toISOString();
@@ -93,17 +94,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (cmd === 'status') {
       await interaction.reply({
         flags: MessageFlags.Ephemeral,
-        content: `Tila: ${running ? 'käynnissä' : 'valmis'}; dry-run: ${config.dryRun}; ` +
+        content: `Tila: ${running ? 'käynnissä' : 'valmis'}; oletustila: ${config.dryRun ? 'DRY RUN' : 'LIVE'}; ` +
           `viimeisin ajo: ${lastTime ?? 'ei vielä'}\n` +
-          (lastResult ? `Tulos: ${JSON.stringify(lastResult)}\n` : '') +
+          (lastResult ? `Tulos: ${formatSyncResult(lastResult)}\n` : '') +
           (lastError ? `Viimeisin virhe: ${lastError}` : ''),
       });
-    } else if (cmd === 'now') {
+    } else if (cmd === 'now' || cmd === 'dryrun') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const response = await runSync();
+      // The slash command's preview never changes persistent config or scheduled mode.
+      const response = await runSync(cmd === 'dryrun' ? { dryRun: true } : {});
       await interaction.editReply(response.busy ? 'Synkronointi on jo käynnissä.' :
         response.error ? `Synkronointi epäonnistui: ${response.error}` :
-        `Synkronointi valmis: ${JSON.stringify(response.result)}`);
+        formatSyncResult(response.result, cmd === 'dryrun'));
     }
   } catch (error) {
     log('error', `Command failed: ${error.message}`);

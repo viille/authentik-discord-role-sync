@@ -7,9 +7,9 @@ Authentik-ryhmien ja suoraan liitettyjen RBAC-roolien yksisuuntainen synkronoint
 - Authentik on roolitietojen lähde. Discord-tunniste tunnistetaan Authentikin Discord OAuth Source -yhteyden `identifier`-kentästä, ei käyttäjänimestä.
 - Synkronoi vain `config/roles.json`-tiedostoon määritetyt Discord-roolit. Kaikki muut roolit säilyvät.
 - Tukee yhtä Authentik-ryhmää tai suoraa RBAC-roolia sekä useita vastaavuuksia samaan Discord-rooliin (OR).
-- Synkronointi ajastetusti (oletus 300 s) ja ylläpitäjän pyynnöstä komennolla `/rolesync now`.
+- Synkronointi ajastetusti (oletus 300 s), ylläpitäjän pyynnöstä komennolla `/rolesync now` sekä muutoksia tekemätön esikatselu komennolla `/rolesync dryrun`.
 - `/link` ja `/unlink` näyttävät yksityisen viestin ja painikkeen Authentikin käyttäjäasetuksiin. **Komennot eivät itse yhdistä tai irrota OAuth-yhteyttä.**
-- Aloittaa turvallisesti: `DRY_RUN=true` ja `MAX_MUTATIONS_PER_RUN=50`.
+- Oletuksena roolimuutokset tehdään heti: `DRY_RUN=false`. Roolimuutosten enimmäismäärä per ajo on `MAX_MUTATIONS_PER_RUN=50`; `/rolesync dryrun` toimii aina vain esikatseluna.
 
 ## Asennus
 
@@ -60,13 +60,13 @@ Sallitut asetukset:
 
 | Muuttuja | Oletus | Tarkoitus |
 | --- | --- | --- |
-| `DRY_RUN` | `true` | Suunnitellut muutokset lokiin, ei Discord-muutoksia |
+| `DRY_RUN` | `false` | Ajastetut ajot ja `/rolesync now` muuttavat rooleja. Arvo `true` estää ne kaikki; `/rolesync dryrun` on aina vain esikatselu. |
 | `REMOVE_UNLINKED` | `true` | Poistaa botin hallinnoimat roolit jäseniltä, joilla ei ole Authentik-Discord-liitosta |
 | `MIN_LINKED_USERS` | `1` | Estää muutokset, jos lähdetilejä löytyy liian vähän |
 | `MAX_MUTATIONS_PER_RUN` | `50` | Estää ajon, jos muutoksia olisi yli rajan |
 | `SYNC_INTERVAL_SECONDS` | `300` | Synkronointien väli sekunteina (vähintään 60) |
 
-**Huomio:** `REMOVE_UNLINKED=true` käsittelee kaikki konfiguroidut Discord-roolit täysin botin hallinnoimina. Jos niitä on aiemmin jaettu käsin, ne voidaan poistaa yhdistämättömiltä jäseniltä. Tarkista suunnitellut poistot dry-run-lokeista ennen `DRY_RUN=false`-asetusta. Jos `REMOVE_UNLINKED=false`, `/unlink` ei johda automaattiseen Discord-roolien poistoon.
+**Huomio:** `REMOVE_UNLINKED=true` käsittelee kaikki konfiguroidut Discord-roolit täysin botin hallinnoimina. Jos niitä on aiemmin jaettu käsin, ne voidaan poistaa yhdistämättömiltä jäseniltä. **Oletusasetus `DRY_RUN=false` muuttaa roolit jo ensimmäisellä käynnistyskerralla.** Jos et halua tätä, aseta tilapäisesti `DRY_RUN=true` ennen ensimmäistä käynnistystä; vaihtoehtoisesti voit käyttää `/rolesync dryrun` -komentoa käynnissä olevassa botissa. Jos `REMOVE_UNLINKED=false`, `/unlink` ei johda automaattiseen Discord-roolien poistoon.
 
 ### 4. Käynnistys
 
@@ -84,7 +84,9 @@ npm run check
 npm start
 ```
 
-Kun dry-run on tarkastettu, vaihda `.env`-tiedostossa `DRY_RUN=false` ja suorita:
+`/rolesync dryrun` näyttää suunnitellut lisäykset ja poistot vain komennon käyttäjälle, mutta **ei muuta rooleja eikä pysäytä ajastettua synkronointia**. `/rolesync now` tekee roolimuutokset heti, ellei `.env`-tiedostossa ole erikseen `DRY_RUN=true`.
+
+Jos muutat `.env`-tiedostoa, päivitä käynnissä oleva kontti:
 
 ```bash
 docker compose up -d --force-recreate
@@ -97,14 +99,15 @@ docker compose up -d --force-recreate
 | `/link` | Kaikki jäsenet | Yksityinen linkki Authentikin **Connected services** -näkymään Discordin yhdistämiseksi |
 | `/unlink` | Kaikki jäsenet | Yksityinen linkki Authentikin **Connected services** -näkymään Discordin irrottamiseksi |
 | `/rolesync status` | Manage Server | Viimeinen synkronointitulos |
-| `/rolesync now` | Manage Server | Käynnistää synkronoinnin heti |
+| `/rolesync now` | Manage Server | Käynnistää synkronoinnin heti (oletusarvoisesti LIVE) |
+| `/rolesync dryrun` | Manage Server | Esikatselee muutokset yksityisessä vastauksessa, ei koskaan muuta rooleja |
 
 Authentikin käyttäjäasetusten osoite on `/if/user/#/settings`. Kun käyttäjä irrottaa Discordin siellä, synkronoijan hallitsemat roolit poistuvat seuraavalla onnistuneella ajolla, **jos** `REMOVE_UNLINKED=true` ja `DRY_RUN=false`. Varmista vaihtoehtoinen kirjautumistapa ennen yhteyden poistamista, jos Discord on ainoa Authentik-kirjautumismenetelmä.
 
 ## Turvallisuus ja rajoitukset
 
 - Authentik-API:n virhe tai epäselvä Discord-tunniste keskeyttää synkronoinnin sen sijaan, että kyseinen tilanne tulkittaisiin massairrottamiseksi.
-- Botti tarkistaa oikeudet, roolihierarkian, jäsenluettelon ja muutoskaton ennen muutoksia.
+- Botti tarkistaa oikeudet, roolihierarkian, jäsenluettelon ja muutoskaton ennen LIVE-muutoksia. `/rolesync dryrun` näyttää myös muutoskaton ylittävät muutokset, mutta ei tee niitä.
 - Yksittäiset Discord-API-virheet kirjataan lokiin ja yritetään myöhemmällä ajolla uudelleen.
 - Synkronointi on polling-pohjainen, ei reaaliaikainen webhook. Tuettu on yksi Discord-palvelin.
 - Botti ei muuta nimimerkkejä, kanavia, käyttäjätietoja eikä synkronoi Discord-rooleja takaisin Authentikiin.

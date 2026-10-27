@@ -66,7 +66,7 @@ export function loadConfig(env = process.env, mappingFile = './config/roles.json
     authentikToken: env.AUTHENTIK_API_TOKEN,
     sourceSlug: env.AUTHENTIK_DISCORD_SOURCE_SLUG,
     syncIntervalSeconds: intEnv(env.SYNC_INTERVAL_SECONDS, 'SYNC_INTERVAL_SECONDS', 300, 60, 86400),
-    dryRun: boolEnv(env.DRY_RUN, 'DRY_RUN', true),
+    dryRun: boolEnv(env.DRY_RUN, 'DRY_RUN', false),
     removeUnlinked: boolEnv(env.REMOVE_UNLINKED, 'REMOVE_UNLINKED', true),
     maxMutations: intEnv(env.MAX_MUTATIONS_PER_RUN, 'MAX_MUTATIONS_PER_RUN', 50, 1, 100000),
     minLinkedUsers: intEnv(env.MIN_LINKED_USERS, 'MIN_LINKED_USERS', 1, 0, 100000),
