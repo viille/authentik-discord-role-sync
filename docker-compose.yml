@@ -1,0 +1,13 @@
+services:
+  role-sync:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
