@@ -1,5 +1,7 @@
 # Authentik Discord Role Sync
 
+Katso myös [CHANGELOG.md](CHANGELOG.md) aiempien versioiden ja päivitysten muutoksista.
+
 Node.js Discord-botti synkronoi määritetyt Authentik-ryhmät, suorat RBAC-roolit ja perityt RBAC-roolit Discordiin. Authentik on käyttöoikeuksien lähde. Version 1.2.0 tietoturvakovennukset estävät tahattoman massapoiston.
 
 ## Toiminnot
