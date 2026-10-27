@@ -56,3 +56,13 @@ test('audit history survives a process restart', () => tempStore((file) => {
   const next = new StateStore(file, key);
   assert.equal(next.history()[0].discordId, '123');
 }));
+
+test('loosening safety thresholds invalidates activation', () => tempStore((file) => {
+  const original = { ...config, maxRemovals: 10, maxMutations: 50, maxLinkDropPercent: 25, minLinkedUsers: 1 };
+  const store = new StateStore(file, configurationKey(original));
+  store.recordPreview();
+  store.activate('admin');
+  const modified = { ...original, maxRemovals: 100 };
+  const restarted = new StateStore(file, configurationKey(modified));
+  assert.equal(restarted.state.activated, false);
+}));
